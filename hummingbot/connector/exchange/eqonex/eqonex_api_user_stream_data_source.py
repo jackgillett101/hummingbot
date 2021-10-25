@@ -21,6 +21,8 @@ from hummingbot.connector.exchange.eqonex.eqonex_constants import EQONEX_WS_URI
 
 import time
 
+from hummingbot.client.settings import CONNECTOR_SETTINGS
+
 
 class EqonexAPIUserStreamDataSource(UserStreamTrackerDataSource):
     _eqonexausds_logger: Optional[HummingbotLogger] = None
@@ -57,22 +59,25 @@ class EqonexAPIUserStreamDataSource(UserStreamTrackerDataSource):
         resp = await self._websocket_connection.recv()
         msg = json.loads(resp)
 
-        if msg["response"] != "Subscribed Successfully":
+        if not msg["isInitialSnap"]:
             self.logger().error(f"Error occurred authenticating to websocket API server. {msg}")
 
         self.logger().info("Successfully authenticated")
+        #self.logger().info(resp)
 
-    async def _subscribe_topic(self, topic: Dict[str, Any]):
-        subscribe_request = {
-            "op": "subscribe",
-            "args": topic
-        }
-        request = json.dumps(subscribe_request)
+    async def _subscribe_topic(self, subscribe_request: Dict[str, Any]):
+        topic = subscribe_request['requestId']
+
+        request = json.dumps(subscribe_request).replace(" ", "")
         await self._websocket_connection.send(request)
         resp = await self._websocket_connection.recv()
+
         msg = json.loads(resp)
-        if msg["response"] != "Subscribed Successfully":
+
+        # Response messages from the websocket are not very consistent
+        if msg.get("response", "") != "Subscribed Successfully" and "type" not in msg:
             self.logger().error(f"Error occurred subscribing to topic. {topic}. {msg}")
+
         self.logger().info(f"Successfully subscribed to {topic}")
 
     async def get_ws_connection(self):
@@ -107,36 +112,17 @@ class EqonexAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 if self._websocket_connection is not None:
                     await self._websocket_connection.close()
                     self._websocket_connection = None
+
                 # Initialize Websocket Connection
                 async with (await self.get_ws_connection()) as ws:
                     self._websocket_connection = ws
 
-                    # Authentication
+                    # Authentication (subscribes to ORDERS by default)
                     await self._authenticate_client()
-                    subscription_list = []
 
-                    assets = set()
-                    # Subscribe to Topic(s)
-                    #for trading_pair in self._trading_pairs:
-                    #    # orders
-                    #    subscription_list.append({
-                    #        "channel": "orders",
-                    #        "instType": "SPOT",
-                    #        "instId": trading_pair})
-
-                    #    # balances
-                    #    source, quote = trading_pair.split('-')
-                    #    assets.add(source)
-                    #    assets.add(quote)
-
-                    # all assets
-                    #for asset in assets:
-                    #    subscription_list.append({
-                    #        "channel": "account",
-                    #        "ccy": asset})
-
-                    # subscribe to all channels
-                    #await self._subscribe_topic(subscription_list)
+                    # Subscribe to Balance
+                    subscribe_balance_request = self._auth.generate_ws_subscribe_balance()
+                    await self._subscribe_topic(subscribe_balance_request)
 
                     # Listen to WebSocket Connection
                     async for message in self._socket_user_stream():

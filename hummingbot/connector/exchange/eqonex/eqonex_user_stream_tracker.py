@@ -45,7 +45,7 @@ class EqonexUserStreamTracker(UserStreamTracker):
 
     @property
     def exchange_name(self) -> str:
-        return "Eqonex"
+        return "eqonex"
 
     async def start(self):
         self._user_stream_tracking_task = safe_ensure_future(

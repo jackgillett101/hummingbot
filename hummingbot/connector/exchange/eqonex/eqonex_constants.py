@@ -54,9 +54,15 @@ exchange_markets = exchange_markets.json()['instrumentPairs']
 trading_pairs = [eqonex_utils.convert_from_exchange_trading_pair(x[1]) for x in exchange_markets]
 
 EQONEX_TRADING_PAIR_IDS = dict(zip(trading_pairs, [x[0] for x in exchange_markets]))
-EQONEX_PRICE_SCALES = dict(zip(trading_pairs, [x[4] for x in exchange_markets]))
+EQONEX_PRICE_SCALES = dict(zip(trading_pairs, [x[4] for x in exchange_markets]))  # {'DOT-USDC': 4, 'MATIC-USDC': 4 ... }
 EQONEX_QUANTITY_SCALES = dict(zip(trading_pairs, [x[5] for x in exchange_markets]))
 
+EQONEX_TRADING_PAIR_SYMBOLS = dict(zip([x[0] for x in exchange_markets], trading_pairs))
+
+
+# EQONEX Order Status Codes
+EQONEX_ORDER_STATUS_CODES = {'0': "live", '1': "partially_filled", '2': "filled", '4': "canceled", '8': "canceled", 'C': "canceled"}
+# Strictly, 4 = Canceled, 8 = Rejected, C = Expired
 
 
 # WS

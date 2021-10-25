@@ -112,7 +112,7 @@ class EqonexExchange(ExchangeBase):
 
     @property
     def name(self) -> str:
-        return "Eqonex"
+        return "eqonex"
 
     @property
     def order_books(self) -> Dict[str, OrderBook]:
@@ -326,11 +326,13 @@ class EqonexExchange(ExchangeBase):
         signature to the request.
         :returns A response in json format.
         """
+        self.logger().info(path_url)
         async with self._throttler.execute_task(path_url):
             url = f"{path_url}"
             client = await self._http_client()
             if is_auth_required:
-                auth_dict = self._eqonex_auth.generate_auth_dict(path_url)
+                auth_dict = self._eqonex_auth.generate_auth_dict(path_url, params)
+
                 headers = auth_dict['headers']
                 params = auth_dict['params']
             else:
@@ -447,24 +449,27 @@ class EqonexExchange(ExchangeBase):
         amount = self.quantize_order_amount(trading_pair, amount)
         price = self.quantize_order_price(trading_pair, price)
 
-        quantity_decimals = trading_rule.max_order_size
-        price_decimals = trading_rule.max_price_significant_digits
+        quantity_decimals = int(trading_rule.max_order_size)
+        price_decimals = int(trading_rule.max_price_significant_digits)
 
         if amount < trading_rule.min_order_size:
             raise ValueError(f"Buy order amount {amount} is lower than the minimum order size "
                              f"{trading_rule.min_order_size}.")
 
         api_params = {"symbol": eqonex_utils.convert_to_exchange_trading_pair(trading_pair),
-                      "clOdrId": order_id,
+                      "clOrdId": order_id,
                       "side": 1 if trade_type.name == "BUY" else 2,
                       "ordType": 2,
-                      "price": int(price * int(price_decimals)),
+                      "price": int(price * pow(10, price_decimals)),
                       "price_scale": int(price_decimals),
-                      "quantity": int(amount * int(quantity_decimals)),
-                      "quantity_scale": int(quantity_decimals)
+                      "quantity": int(amount * pow(10, quantity_decimals)),
+                      "quantity_scale": int(quantity_decimals),
+                      "blockWaitAck": 1  # Need to include this to get an order_id back from API
                       }
         if order_type is OrderType.LIMIT_MAKER:
             api_params["timeInForce"] = 8
+
+        #self.logger().info(api_params)
 
         self.start_tracking_order(order_id,
                                   None,
@@ -489,6 +494,7 @@ class EqonexExchange(ExchangeBase):
                 'ordType': 2
             }
             """
+            #self.logger().info(order_result)
             exchange_order_id = str(order_result["id"])
             tracked_order = self._in_flight_orders.get(order_id)
             if tracked_order is not None:
@@ -551,8 +557,7 @@ class EqonexExchange(ExchangeBase):
 
     async def _execute_cancel(self, trading_pair: str, order_id: str) -> str:
         """
-        Executes order cancellation process by first calling cancel-order API. The API result doesn't confirm whether
-        the cancellation is successful, it simply states it receives the request.
+        Executes order cancellation process by first calling cancel-order API.
         :param trading_pair: The market trading pair
         :param order_id: The internal order id
         order.last_state to change to CANCELED
@@ -564,13 +569,17 @@ class EqonexExchange(ExchangeBase):
             if tracked_order.exchange_order_id is None:
                 await tracked_order.get_exchange_order_id()
             ex_order_id = tracked_order.exchange_order_id
-            await self._api_request(
+            response = await self._api_request(
                 "post",
                 CONSTANTS.EQONEX_ORDER_CANCEL,
                 {"symbol": eqonex_utils.convert_to_exchange_trading_pair(trading_pair),
                  "clOrdId": order_id},
                 True
             )
+
+            self.logger().info("TESTING TRACKING CANCELLATION")
+            self.logger().info(response)
+            self.stop_tracking_order(order_id)
             return order_id
         except asyncio.CancelledError:
             raise
@@ -661,24 +670,34 @@ class EqonexExchange(ExchangeBase):
                 if "error" in response:
                     raise ValueError(f"Failed to get order status - {order_id}. Order not found.")
 
-                result = response["result"]
-                if "trade_list" in result:
-                    for trade_msg in result["trade_list"]:
-                        await self._process_trade_message(trade_msg)
+                order_status = response["ordStatus"]
+                if order_status in {'1', '2'}:
+                    # TODO: what do we do if order was filled?
+                    pass
+                    #await self._process_trade_message(trade_msg)
 
-                self._process_order_message(result["order_info"])
+                self._process_order_message(response)
 
     def _process_order_message(self, order_msg: Dict[str, Any]):
         """
         Updates in-flight order and triggers cancellation or failure event if needed.
         :param order_msg: The order response from either REST or web socket API (they are of the same format)
         """
-        client_order_id = order_msg["client_oid"]
+        self.logger().info("In flght orders:")
+        self.logger().info(self._in_flight_orders)
+        self.logger().info(order_msg)
+
+        client_order_id = order_msg["clOrdId"]
         if client_order_id not in self._in_flight_orders:
             return
+
         tracked_order = self._in_flight_orders[client_order_id]
+
         # Update order execution status
-        tracked_order.last_state = order_msg["status"]
+        order_status = CONSTANTS.EQONEX_ORDER_STATUS_CODES[order_msg["ordStatus"]]
+        tracked_order.last_state = order_status
+        self.logger().info(order_status)
+
         if tracked_order.is_cancelled:
             self.logger().info(f"Successfully cancelled order {client_order_id}.")
             self.trigger_event(MarketEvent.OrderCancelled,
@@ -843,23 +862,43 @@ class EqonexExchange(ExchangeBase):
         Listens to message in _user_stream_tracker.user_stream queue. The messages are put in by
         EqonexAPIUserStreamDataSource.
         """
+        
+        # TODO TODO TODO!!!
+        
         async for event_message in self._iter_user_event_queue():
             try:
-                if "result" not in event_message or "channel" not in event_message["result"]:
+                if "type" not in event_message:
                     continue
-                channel = event_message["result"]["channel"]
-                if "user.trade" in channel:
+
+                channel = event_message["type"]
+
+                if channel == 1: # Orderbook Channel
+                    # This is consumed elsewhere, no action here
+                    continue
+
+                elif channel == 6: # Orders Channel
+                    self.logger().info(f"ORDER MESSAGE RECIEVED")
+                    self.logger().info(event_message)
+
+                    for order_msg in event_message["orders"]:
+                        self._process_order_message(order_msg)
+
+                elif channel == 7: # Positions Channel - NOT YET SUBSCRIBING
+                    self.logger().info(f"TRADE MESSAGE RECIEVED")
+                    self.logger().info(event_message)
+
+                    # POSITIONS CHANGED - TRADE!
                     for trade_msg in event_message["result"]["data"]:
                         await self._process_trade_message(trade_msg)
-                elif "user.order" in channel:
-                    for order_msg in event_message["result"]["data"]:
-                        self._process_order_message(order_msg)
-                elif channel == "user.balance":
-                    balances = event_message["result"]["data"]
-                    for balance_entry in balances:
-                        asset_name = balance_entry["currency"]
-                        self._account_balances[asset_name] = Decimal(str(balance_entry["balance"]))
-                        self._account_available_balances[asset_name] = Decimal(str(balance_entry["available"]))
+
+                elif channel == 9: # Balance Channel
+                    continue
+#                    balances = event_message["availableTradingQuantity"]
+#                    for balance_entry in balances:
+#                        asset_name = balance_entry["symbol"]
+#                        self._account_balances[asset_name] = Decimal(str(balance_entry["balance"]))
+#                        self._account_available_balances[asset_name] = Decimal(str(balance_entry["available"]))
+
             except asyncio.CancelledError:
                 raise
             except Exception:

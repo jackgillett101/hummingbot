@@ -247,26 +247,28 @@ class EqonexAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
                     for trading_pair in trading_pairs:
                         subscribe_request: Dict[str, Any] = {
-                            "op": "subscribe",
-                            "args": [
-                                {
-                                    "channel": "books",
-                                    "instId": trading_pair
-                                }
-                            ]
+                            "requestId": "orderbook",
+                            "event": "S",
+                            "types": [2],
+                            "symbols": [eqonex_utils.convert_to_exchange_trading_pair(trading_pair)],
+                            "level": 2
                         }
-                        await ws.send(json.dumps(subscribe_request))
+                        #self.logger().info(subscribe_request)
+                        await ws.send(json.dumps(subscribe_request).replace(" ", ""))
 
                     async for raw_msg in self._inner_messages(ws):
                         decoded_msg: str = raw_msg
+                        #self.logger().info(decoded_msg)
 
-                        if '"event":"subscribe"' in decoded_msg:
+                        if '"response":"Subscribed Successfully"' in decoded_msg:
                             self.logger().debug(f"Subscribed to channel, full message: {decoded_msg}")
-                        elif '"action":"update"' in decoded_msg:
+
+                        elif 'bids' in decoded_msg and 'asks' in decoded_msg:
                             msg = json.loads(decoded_msg)
-                            for data in msg['data']:
-                                order_book_message: OrderBookMessage = EqonexOrderBook.diff_message_from_exchange(data, int(data['ts']), msg['arg'])
-                                output.put_nowait(order_book_message)
+                            ts = (msg['bids'] if len(msg['bids']) > 0 else msg['asks'])[0][2]  # Timestamps are on the bid/ask records
+                            order_book_message: OrderBookMessage = EqonexOrderBook.diff_message_from_exchange(msg, int(ts))
+                            output.put_nowait(order_book_message)
+
                         else:
                             self.logger().debug(f"Unrecognized message received from Eqonex websocket: {decoded_msg}")
             except asyncio.CancelledError:

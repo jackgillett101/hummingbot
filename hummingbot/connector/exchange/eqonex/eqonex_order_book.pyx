@@ -20,7 +20,8 @@ from hummingbot.core.data_type.order_book_message import OrderBookMessage, Order
 from hummingbot.connector.exchange.eqonex.eqonex_constants import (
     EQONEX_TRADING_PAIR_IDS,
     EQONEX_PRICE_SCALES,
-    EQONEX_QUANTITY_SCALES
+    EQONEX_QUANTITY_SCALES,
+    EQONEX_TRADING_PAIR_SYMBOLS
 )
 
 _eqonexob_logger = None
@@ -76,26 +77,23 @@ cdef class EqonexOrderBook(OrderBook):
             "amount": msg["size"],
             "price": msg["price"]
         }
-        return OrderBookMessage(OrderBookMessageType.DIFF, content, timestamp or msg_ts)
+        return OrderBookMessage(OrderBookMessageType.TRADE, content, timestamp or msg_ts)
 
     @classmethod
     def diff_message_from_exchange(cls,
                                    data: Dict[str, Any],
                                    timestamp: float = None,
                                    metadata: Optional[Dict] = None) -> OrderBookMessage:
-        if metadata:
-            data.update(metadata)
 
         msg_ts = int(timestamp * 1e-3)
 
-        trading_pair = data["instId"]
-
+        trading_pair = EQONEX_TRADING_PAIR_SYMBOLS[data["pairId"]]
         price_scale = pow(10, EQONEX_PRICE_SCALES[trading_pair])
         quantity_scale = pow(10, EQONEX_QUANTITY_SCALES[trading_pair])
         scale_array = np.array([price_scale, quantity_scale])
 
-        scaled_bids = np.array(data['bids'])[:,:2] / scale_array.reshape(1,-1)
-        scaled_asks = np.array(data['asks'])[:,:2] / scale_array.reshape(1,-1)
+        scaled_bids = np.array([]) if len(data['bids']) == 0 else np.array(data['bids'])[:,:2] / scale_array.reshape(1,-1)
+        scaled_asks = np.array([]) if len(data['asks']) == 0 else np.array(data['asks'])[:,:2] / scale_array.reshape(1,-1)
 
         content = {
             "trading_pair": trading_pair,
@@ -103,6 +101,7 @@ cdef class EqonexOrderBook(OrderBook):
             "bids": scaled_bids,
             "asks": scaled_asks
         }
+        
         return OrderBookMessage(OrderBookMessageType.DIFF, content, timestamp or msg_ts)
 
     @classmethod

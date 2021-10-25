@@ -25,7 +25,7 @@ class EqonexAuth:
         params: Dict[str, Any] = None
     ) -> Dict[str, any]:
 
-        params = {"userId": int(self.user_id)}
+        params = {**{"userId": int(self.user_id)}, **params}
 
         if self.subaccount_id is not None:
             params["account"] = int(self.subaccount_id)
@@ -84,6 +84,16 @@ class EqonexAuth:
                 "types":[6],
                 "username": self.username,
                 "password": self.password,
-                "account": self.user_id,
-                "isInitialSnap": "false"
+                "account": self.subaccount_id,
+                "isInitialSnap": "true"
+            }
+
+    def generate_ws_subscribe_balance(self):
+        return {
+                "requestId": "WS-HummingBot-balance",
+                "event": "S",
+                "types":[9],
+                "username": self.username,
+                "password": self.password,
+                "account": self.subaccount_id
             }

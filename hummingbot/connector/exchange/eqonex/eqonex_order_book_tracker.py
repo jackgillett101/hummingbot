@@ -36,7 +36,7 @@ class EqonexOrderBookTracker(OrderBookTracker):
 
     @property
     def exchange_name(self) -> str:
-        return "Eqonex"
+        return "eqonex"
 
     async def _order_book_diff_router(self):
         """
