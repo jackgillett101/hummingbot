@@ -1,20 +1,18 @@
-#!/usr/bin/env python
 from decimal import Decimal
 from typing import (
     Any,
     Dict,
     Optional
 )
-
+import asyncio
 from hummingbot.core.event.events import (
     OrderType,
     TradeType
 )
-#from hummingbot.connector.exchange.eqonex.eqonex_exchange import EqonexExchange
 from hummingbot.connector.in_flight_order_base import InFlightOrderBase
 
 
-cdef class EqonexInFlightOrder(InFlightOrderBase):
+class EqonexInFlightOrder(InFlightOrderBase):
     def __init__(self,
                  client_order_id: str,
                  exchange_order_id: str,
@@ -24,7 +22,6 @@ cdef class EqonexInFlightOrder(InFlightOrderBase):
                  price: Decimal,
                  amount: Decimal,
                  initial_state: str = "live"):
-
         super().__init__(
             client_order_id,
             exchange_order_id,
@@ -35,6 +32,8 @@ cdef class EqonexInFlightOrder(InFlightOrderBase):
             amount,
             initial_state  # submitted, partial-filled, cancelling, filled, canceled, partial-canceled
         )
+        self.trade_id_set = set()
+        self.cancelled_event = asyncio.Event()
 
     @property
     def is_done(self) -> bool:
@@ -54,17 +53,20 @@ cdef class EqonexInFlightOrder(InFlightOrderBase):
 
     @classmethod
     def from_json(cls, data: Dict[str, Any]) -> InFlightOrderBase:
-        cdef:
-            EqonexInFlightOrder retval = EqonexInFlightOrder(
-                client_order_id=data["client_order_id"],
-                exchange_order_id=data["exchange_order_id"],
-                trading_pair=data["trading_pair"],
-                order_type=getattr(OrderType, data["order_type"]),
-                trade_type=getattr(TradeType, data["trade_type"]),
-                price=Decimal(data["price"]),
-                amount=Decimal(data["amount"]),
-                initial_state=data["last_state"]
-            )
+        """
+        :param data: json data from API
+        :return: formatted InFlightOrder
+        """
+        retval = EqonexInFlightOrder(
+            client_order_id=data["client_order_id"],
+            exchange_order_id=data["exchange_order_id"],
+            trading_pair=data["trading_pair"],
+            order_type=getattr(OrderType, data["order_type"]),
+            trade_type=getattr(TradeType, data["trade_type"]),
+            price=Decimal(data["price"]),
+            amount=Decimal(data["amount"]),
+            initial_state=data["last_state"]
+        )
         retval.executed_amount_base = Decimal(data["executed_amount_base"])
         retval.executed_amount_quote = Decimal(data["executed_amount_quote"])
         retval.fee_asset = data["fee_asset"]

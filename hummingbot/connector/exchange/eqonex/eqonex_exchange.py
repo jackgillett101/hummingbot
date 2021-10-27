@@ -577,9 +577,8 @@ class EqonexExchange(ExchangeBase):
                 True
             )
 
-            self.logger().info("TESTING TRACKING CANCELLATION")
-            self.logger().info(response)
-            self.stop_tracking_order(order_id)
+            #self.logger().info("TESTING TRACKING CANCELLATION")
+            #self.logger().info(response)
             return order_id
         except asyncio.CancelledError:
             raise
@@ -683,9 +682,10 @@ class EqonexExchange(ExchangeBase):
         Updates in-flight order and triggers cancellation or failure event if needed.
         :param order_msg: The order response from either REST or web socket API (they are of the same format)
         """
-        self.logger().info("In flght orders:")
-        self.logger().info(self._in_flight_orders)
-        self.logger().info(order_msg)
+        #self.logger().info("In flght orders:")
+        #self.logger().info(self.limit_orders)
+        #self.logger().info(self._in_flight_orders)
+        #self.logger().info(order_msg)
 
         client_order_id = order_msg["clOrdId"]
         if client_order_id not in self._in_flight_orders:
@@ -696,7 +696,7 @@ class EqonexExchange(ExchangeBase):
         # Update order execution status
         order_status = CONSTANTS.EQONEX_ORDER_STATUS_CODES[order_msg["ordStatus"]]
         tracked_order.last_state = order_status
-        self.logger().info(order_status)
+        #self.logger().info(order_status)
 
         if tracked_order.is_cancelled:
             self.logger().info(f"Successfully cancelled order {client_order_id}.")
@@ -878,14 +878,14 @@ class EqonexExchange(ExchangeBase):
 
                 elif channel == 6: # Orders Channel
                     self.logger().info(f"ORDER MESSAGE RECIEVED")
-                    self.logger().info(event_message)
+                    #self.logger().info(event_message)
 
                     for order_msg in event_message["orders"]:
                         self._process_order_message(order_msg)
 
                 elif channel == 7: # Positions Channel - NOT YET SUBSCRIBING
-                    self.logger().info(f"TRADE MESSAGE RECIEVED")
-                    self.logger().info(event_message)
+                    #self.logger().info(f"TRADE MESSAGE RECIEVED")
+                    #self.logger().info(event_message)
 
                     # POSITIONS CHANGED - TRADE!
                     for trade_msg in event_message["result"]["data"]:
