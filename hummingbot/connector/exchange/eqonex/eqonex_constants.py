@@ -8,6 +8,7 @@ from hummingbot.connector.exchange.eqonex import eqonex_utils
 
 EQONEX_BASE_URL = "https://eqonex.com/api/"
 
+EQONEX_CURRENCIES_URL = urljoin(EQONEX_BASE_URL, 'getInstruments')
 EQONEX_INSTRUMENTS_URL = urljoin(EQONEX_BASE_URL, 'getInstrumentPairs')
 EQONEX_TRADE_HISTORY_URL = urljoin(EQONEX_BASE_URL, 'getTradeHistory?pairId={trading_pair_id}')
 EQONEX_ORDER_BOOK_URL = urljoin(EQONEX_BASE_URL, 'getOrderBook?pairId={trading_pair_id}')
@@ -46,6 +47,13 @@ RATE_LIMITS = [
 
 # EQONEX returns all prices and quantities as integers, with a price_scale and 
 # a quantity_scale adjustment required that varies by trading pair
+eqonex_currencies = requests.get(EQONEX_CURRENCIES_URL)
+if eqonex_currencies.status_code != 200:
+    raise IOError(f"Error fetching Eqonex constants from API. HTTP status is {exchange_markets.status}.")
+
+eqonex_currencies = eqonex_currencies.json()['instruments']
+EQONEX_CURRENCIES_IDS = dict(zip([x[0] for x in eqonex_currencies], [x[1] for x in eqonex_currencies]))
+
 exchange_markets = requests.get(EQONEX_INSTRUMENTS_URL)
 if exchange_markets.status_code != 200:
     raise IOError(f"Error fetching Eqonex constants from API. HTTP status is {exchange_markets.status}.")

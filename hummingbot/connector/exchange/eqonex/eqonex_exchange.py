@@ -494,8 +494,19 @@ class EqonexExchange(ExchangeBase):
                 'ordType': 2
             }
             """
-            #self.logger().info(order_result)
+            self.logger().info("Order params:")
+            self.logger().info(api_params)
+            self.logger().info("What if MIC rejected?")
+            self.logger().info(order_result)
+
             exchange_order_id = str(order_result["id"])
+
+            # If exchange_order_id is 0, it means we hit the EQONEX market integrity controls
+            # and the order has been cancelled
+            if exchange_order_id == 0:
+                self.trigger_event(MarketEvent.OrderFailure,
+                    MarketOrderFailureEvent(self.current_timestamp, order_id, order_type))
+
             tracked_order = self._in_flight_orders.get(order_id)
             if tracked_order is not None:
                 self.logger().info(f"Created {order_type.name} {trade_type.name} order {order_id} for "
@@ -670,10 +681,8 @@ class EqonexExchange(ExchangeBase):
                     raise ValueError(f"Failed to get order status - {order_id}. Order not found.")
 
                 order_status = response["ordStatus"]
-                if order_status in {'1', '2'}:
-                    # TODO: what do we do if order was filled?
-                    pass
-                    #await self._process_trade_message(trade_msg)
+                if order_status in {'1', '2'}:  # 1 = Partially filled, 2 = Filled
+                    await self._process_trade_message(response)
 
                 self._process_order_message(response)
 
@@ -722,15 +731,25 @@ class EqonexExchange(ExchangeBase):
         Updates in-flight order and trigger order filled event for trade message received. Triggers order completed
         event if the total executed amount equals to the specified order amount.
         """
-        for order in self._in_flight_orders.values():
-            await order.get_exchange_order_id()
-        track_order = [o for o in self._in_flight_orders.values() if trade_msg["order_id"] == o.exchange_order_id]
-        if not track_order:
+        client_order_id = trade_msg["clOrdId"]
+        if client_order_id not in self._in_flight_orders.keys():
             return
-        tracked_order = track_order[0]
-        updated = tracked_order.update_with_trade_update(trade_msg)
+
+        tracked_order = self._in_flight_orders[client_order_id]
+
+        updated = tracked_order.update_with_order_status_update(trade_msg)
         if not updated:
             return
+
+        self.logger().info("DID A TRADE HAPPEN? EXECUTED NOW {}".format(tracked_order.executed_amount_base))
+
+        traded_price = str(trade_msg["lastPx"] / pow(10, trade_msg["lastPx_scale"]))
+        traded_quantity = str(trade_msg["cumQty"] / pow(10, trade_msg["cumQty_scale"]))
+        fee = str(trade_msg["fee"] / pow(10, trade_msg["fee_scale"]))
+        fee_currency = CONSTANTS.EQONEX_CURRENCIES_IDS[trade_msg["feeInstrumentId"]]
+        self.logger().info(fee)
+        self.logger().info("Fee CCY {}".format(fee_currency))
+
         self.trigger_event(
             MarketEvent.OrderFilled,
             OrderFilledEvent(
@@ -739,10 +758,10 @@ class EqonexExchange(ExchangeBase):
                 tracked_order.trading_pair,
                 tracked_order.trade_type,
                 tracked_order.order_type,
-                Decimal(str(trade_msg["traded_price"])),
-                Decimal(str(trade_msg["traded_quantity"])),
-                TradeFee(0.0, [(trade_msg["fee_currency"], Decimal(str(trade_msg["fee"])))]),
-                exchange_trade_id=trade_msg["order_id"]
+                Decimal(str(traded_price)),
+                Decimal(str(traded_quantity)),
+                TradeFee(0.0, [(fee_currency, Decimal(str(fee)))]),
+                exchange_trade_id=trade_msg["orderId"]
             )
         )
         if math.isclose(tracked_order.executed_amount_base, tracked_order.amount) or \
@@ -883,13 +902,20 @@ class EqonexExchange(ExchangeBase):
                     for order_msg in event_message["orders"]:
                         self._process_order_message(order_msg)
 
-                elif channel == 7: # Positions Channel - NOT YET SUBSCRIBING
-                    #self.logger().info(f"TRADE MESSAGE RECIEVED")
+                        # How do we determine if a trade happened? For now, use orders and
+                        # check cumulative fill quantity each time
+                        order_status = order_msg["ordStatus"]
+                        if order_status in {'1', '2'}:  # 1 = Partially filled, 2 = Filled
+                            self.logger().info(f"TRADE MESSAGE MAYBE RECIEVED")
+                            await self._process_trade_message(order_msg)
+
+                #elif channel == 7: # Positions Channel - NOT YET SUBSCRIBING
+                #    self.logger().info(f"TRADE MESSAGE RECIEVED")
                     #self.logger().info(event_message)
 
                     # POSITIONS CHANGED - TRADE!
-                    for trade_msg in event_message["result"]["data"]:
-                        await self._process_trade_message(trade_msg)
+                #    for order_msg in event_message["orders"]:
+                #        await self._process_trade_message(trade_msg)
 
                 elif channel == 9: # Balance Channel
                     continue

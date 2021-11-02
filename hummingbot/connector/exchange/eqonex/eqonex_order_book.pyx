@@ -49,8 +49,16 @@ cdef class EqonexOrderBook(OrderBook):
         quantity_scale = pow(10, EQONEX_QUANTITY_SCALES[trading_pair])
         scale_array = np.array([price_scale, quantity_scale])
 
-        scaled_bids = np.array(msg['bids'])[:,:2] / scale_array.reshape(1,-1)
-        scaled_asks = np.array(msg['asks'])[:,:2] / scale_array.reshape(1,-1)
+        # Empty orderbooks causing breaks... check for that explicitly
+        if len(msg['bids']):
+            scaled_bids = np.array(msg['bids'])[:,:2] / scale_array.reshape(1,-1)
+        else:
+            scaled_bids = np.array([])
+
+        if len(msg['asks']):
+            scaled_asks = np.array(msg['asks'])[:,:2] / scale_array.reshape(1,-1)
+        else:
+            scaled_asks = np.array([])
 
         content = {
             "trading_pair": trading_pair,
